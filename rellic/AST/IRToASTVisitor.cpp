@@ -158,7 +158,9 @@ clang::Expr *IRToASTVisitor::CreateLiteralExpr(llvm::Constant *constant) {
     } break;
     // Integers
     case llvm::Type::IntegerTyID: {
-      auto val{llvm::cast<llvm::ConstantInt>(constant)->getValue()};
+      auto val{llvm::isa<llvm::UndefValue>(constant)
+                   ? llvm::APInt(ast_ctx.getTypeSize(c_type), 0)
+                   : llvm::cast<llvm::ConstantInt>(constant)->getValue()};
       switch (clang::cast<clang::BuiltinType>(c_type)->getKind()) {
         case clang::BuiltinType::Kind::UChar:
         case clang::BuiltinType::Kind::SChar:
@@ -206,14 +208,34 @@ clang::Expr *IRToASTVisitor::CreateLiteralExpr(llvm::Constant *constant) {
                                                      val.getMinSignedBits(),
                                                      /*sign=*/0)};
           auto least_size{ast_ctx.getTypeSize(least_type)};
-          if (least_size <= ast_ctx.getTypeSize(ast_ctx.UnsignedLongLongTy)) {
+          auto representable_size{
+              ast_ctx.getTypeSize(ast_ctx.UnsignedLongLongTy)};
+          if (least_size <= representable_size) {
             result = CreateCStyleCastExpr(
                 ast_ctx, c_type, clang::CastKind::CK_IntegralCast,
                 CreateIntegerLiteral(ast_ctx, val.trunc(least_size),
                                      least_type));
           } else {
-            LOG(FATAL) << "Integer literal is too large to be represented in "
-                          "any integer type";
+            for (size_t offset = 0; offset < least_size;
+                 offset += representable_size) {
+              auto literal = CreateCStyleCastExpr(
+                  ast_ctx, c_type, clang::CastKind::CK_IntegralCast,
+                  CreateIntegerLiteral(
+                      ast_ctx, val.lshr(offset).trunc(representable_size),
+                      ast_ctx.UnsignedLongLongTy));
+              if (!result) {
+                result = literal;
+              } else {
+                result = CreateBinaryOperator(
+                    ast_ctx, clang::BinaryOperatorKind::BO_Or, result,
+                    CreateBinaryOperator(
+                        ast_ctx, clang::BinaryOperatorKind::BO_Shl, literal,
+                        CreateIntegerLiteral(
+                            ast_ctx, llvm::APInt(least_size, offset), c_type),
+                        c_type),
+                    c_type);
+              }
+            }
           }
         } break;
 

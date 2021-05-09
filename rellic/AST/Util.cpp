@@ -23,6 +23,7 @@
 
 #include "rellic/AST/Compat/Expr.h"
 #include "rellic/AST/Compat/Stmt.h"
+#include <llvm/Support/MathExtras.h>
 
 namespace rellic {
 
@@ -70,7 +71,7 @@ bool ReplaceChildren(clang::Stmt *stmt, StmtMap &repl_map) {
 
 clang::QualType GetLeastIntTypeForBitWidth(clang::ASTContext &ctx,
                                            unsigned size, unsigned sign) {
-  auto result{ctx.getIntTypeForBitwidth(size, sign)};
+  auto result{ctx.getIntTypeForBitwidth(llvm::PowerOf2Ceil(size), sign)};
   if (!result.isNull()) {
     return result;
   }
