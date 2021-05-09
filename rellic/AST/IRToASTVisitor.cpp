@@ -231,11 +231,12 @@ clang::Expr *IRToASTVisitor::CreateLiteralExpr(llvm::Constant *constant) {
                     CreateBinaryOperator(
                         ast_ctx, clang::BinaryOperatorKind::BO_Shl, literal,
                         CreateIntegerLiteral(
-                            ast_ctx, llvm::APInt(least_size, offset), c_type),
+                            ast_ctx, llvm::APInt(representable_size, offset), ast_ctx.UnsignedLongLongTy),
                         c_type),
                     c_type);
               }
             }
+            result = CreateParenExpr(ast_ctx, result);
           }
         } break;
 
