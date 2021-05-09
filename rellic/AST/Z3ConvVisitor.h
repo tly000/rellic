@@ -97,6 +97,8 @@ class Z3ConvVisitor : public clang::RecursiveASTVisitor<Z3ConvVisitor> {
   void VisitUnaryApp(z3::expr z3_op);
   void VisitBinaryApp(z3::expr z3_op);
   void VisitTernaryApp(z3::expr z3_op);
+
+  void VisitConcatApp(z3::expr z_expr);
 };
 
 }  // namespace rellic
