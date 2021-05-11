@@ -340,8 +340,17 @@ bool Z3ConvVisitor::VisitFieldDecl(clang::FieldDecl *field) {
 }
 
 bool Z3ConvVisitor::VisitFunctionDecl(clang::FunctionDecl *func) {
-  DLOG(INFO) << "VisitFunctionDecl";
-  LOG(FATAL) << "Unimplemented FunctionDecl visitor";
+  auto name = func->getNameAsString();
+  DLOG(INFO) << "VisitFunctionDecl: " << name;
+
+  if (z3_decl_map.count(func)) {
+    DLOG(INFO) << "Re-declaration of " << name << "; Returning.";
+    return true;
+  }
+
+  auto z_const = z3_ctx->constant(name.c_str(), GetZ3Sort(ast_ctx->getPointerType(func->getType())));
+  InsertZ3Decl(func, z_const.decl());
+
   return true;
 }
 
@@ -448,6 +457,10 @@ bool Z3ConvVisitor::VisitImplicitCastExpr(clang::ImplicitCastExpr *c_cast) {
   if (z3_expr_map.count(c_cast)) {
     return true;
   }
+  if (c_cast->getCastKind() == clang::CastKind::CK_FunctionToPointerDecay) {
+    InsertZ3Expr(c_cast, GetOrCreateZ3Expr(c_cast->getSubExpr()));
+    return true;
+  }
   return HandleCastExpr<clang::ImplicitCastExpr>(c_cast);
 }
 
@@ -491,7 +504,27 @@ bool Z3ConvVisitor::VisitMemberExpr(clang::MemberExpr *expr) {
 }
 
 bool Z3ConvVisitor::VisitCallExpr(clang::CallExpr *call) {
-  LOG(FATAL) << "Unimplemented CallExpr visitor";
+  DLOG(INFO) << "VisitCallExpr";
+  if (z3_expr_map.count(call)) {
+    return true;
+  }
+
+  z3::sort_vector arg_sorts(*z3_ctx);
+  z3::expr_vector arg_exprs(*z3_ctx);
+
+  arg_sorts.push_back(GetZ3Sort(call->getCallee()->getType()));
+  arg_exprs.push_back(GetOrCreateZ3Expr(call->getCallee()));
+
+  for (unsigned int i = 0; i < call->getNumArgs(); i++) {
+    arg_sorts.push_back(GetZ3Sort(call->getArg(i)->getType()));
+    arg_exprs.push_back(GetOrCreateZ3Expr(call->getArg(i)));
+  }
+
+  auto z_range = GetZ3Sort(call->getType());
+  auto z_func = z3_ctx->function("CallFunc", arg_sorts, z_range);
+
+  InsertZ3Expr(call, z_func(arg_exprs));
+
   return true;
 }
 
@@ -782,6 +815,16 @@ bool Z3ConvVisitor::VisitFloatingLiteral(clang::FloatingLiteral *lit) {
 
 void Z3ConvVisitor::VisitZ3Expr(z3::expr z_expr) {
   if (z_expr.is_app()) {
+    if (z_expr.decl().name().kind() == Z3_STRING_SYMBOL &&
+        z_expr.decl().name().str() == "CallFunc") {
+      std::vector<clang::Expr *> args;
+      for (auto i = 1U; i < z_expr.num_args(); ++i) {
+        args.push_back(GetOrCreateCExpr(z_expr.arg(i)));
+      }
+      auto callee = GetOrCreateCExpr(z_expr.arg(0));
+      InsertCExpr(z_expr, ast.CreateCall(callee, args));
+      return;
+    }
     for (auto i = 0U; i < z_expr.num_args(); ++i) {
       GetOrCreateCExpr(z_expr.arg(i));
     }
